@@ -14,8 +14,6 @@ export default async function Dashboard() {
     return redirect("/sign-in");
   }
 
-
-
   return (
     <>
       <DashboardNavbar />
@@ -26,9 +24,44 @@ export default async function Dashboard() {
             <h1 className="text-3xl font-bold">Dashboard</h1>
             <div className="bg-secondary/50 text-sm p-3 px-4 rounded-lg text-muted-foreground flex gap-2 items-center">
               <InfoIcon size="14" />
-              <span>This is a protected page only visible to authenticated users</span>
+              <span>Welcome to your Invoice Wizard dashboard</span>
             </div>
           </header>
+
+          {/* Quick Stats */}
+          <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-card rounded-xl p-6 border shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    Total Customers
+                  </p>
+                  <p className="text-2xl font-bold text-green-600">-</p>
+                </div>
+                <UserCircle className="h-8 w-8 text-green-600" />
+              </div>
+            </div>
+            <div className="bg-card rounded-xl p-6 border shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    Total Invoices
+                  </p>
+                  <p className="text-2xl font-bold text-blue-600">-</p>
+                </div>
+                <InfoIcon className="h-8 w-8 text-blue-600" />
+              </div>
+            </div>
+            <div className="bg-card rounded-xl p-6 border shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Revenue</p>
+                  <p className="text-2xl font-bold text-purple-600">RM 0.00</p>
+                </div>
+                <InfoIcon className="h-8 w-8 text-purple-600" />
+              </div>
+            </div>
+          </section>
 
           {/* User Profile Section */}
           <section className="bg-card rounded-xl p-6 border shadow-sm">

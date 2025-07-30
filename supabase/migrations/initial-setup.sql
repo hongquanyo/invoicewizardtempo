@@ -90,4 +90,113 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 DROP TRIGGER IF EXISTS on_auth_user_updated ON auth.users;
 CREATE TRIGGER on_auth_user_updated
   AFTER UPDATE ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_user_update(); 
+  FOR EACH ROW EXECUTE FUNCTION public.handle_user_update();
+
+-- Customers table
+CREATE TABLE IF NOT EXISTS public.customers (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    email text,
+    phone text,
+    address text,
+    created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at timestamp with time zone DEFAULT timezone('utc'::text, now())
+);
+
+-- Enable RLS for customers
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+
+-- Create policy for customers
+DROP POLICY IF EXISTS "Users can manage own customers" ON public.customers;
+CREATE POLICY "Users can manage own customers"
+ON public.customers FOR ALL
+USING (auth.uid() = user_id);
+
+-- Invoices table
+CREATE TABLE IF NOT EXISTS public.invoices (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    customer_id uuid NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
+    invoice_number text NOT NULL,
+    invoice_date date NOT NULL DEFAULT CURRENT_DATE,
+    due_date date NOT NULL,
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'paid', 'overdue')),
+    subtotal decimal(10,2) NOT NULL DEFAULT 0,
+    tax_rate decimal(5,2) NOT NULL DEFAULT 6.00,
+    tax_amount decimal(10,2) NOT NULL DEFAULT 0,
+    total decimal(10,2) NOT NULL DEFAULT 0,
+    notes text,
+    created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at timestamp with time zone DEFAULT timezone('utc'::text, now())
+);
+
+-- Enable RLS for invoices
+ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
+
+-- Create policy for invoices
+DROP POLICY IF EXISTS "Users can manage own invoices" ON public.invoices;
+CREATE POLICY "Users can manage own invoices"
+ON public.invoices FOR ALL
+USING (auth.uid() = user_id);
+
+-- Line items table
+CREATE TABLE IF NOT EXISTS public.line_items (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_id uuid NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
+    description text NOT NULL,
+    quantity decimal(10,2) NOT NULL DEFAULT 1,
+    unit_price decimal(10,2) NOT NULL DEFAULT 0,
+    total decimal(10,2) NOT NULL DEFAULT 0,
+    created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+-- Enable RLS for line_items
+ALTER TABLE public.line_items ENABLE ROW LEVEL SECURITY;
+
+-- Create policy for line_items
+DROP POLICY IF EXISTS "Users can manage line items for own invoices" ON public.line_items;
+CREATE POLICY "Users can manage line items for own invoices"
+ON public.line_items FOR ALL
+USING (
+    EXISTS (
+        SELECT 1 FROM public.invoices 
+        WHERE invoices.id = line_items.invoice_id 
+        AND invoices.user_id = auth.uid()
+    )
+);
+
+-- Enable realtime for all tables
+alter publication supabase_realtime add table customers;
+alter publication supabase_realtime add table invoices;
+alter publication supabase_realtime add table line_items;
+
+-- Create function to update invoice totals
+CREATE OR REPLACE FUNCTION update_invoice_totals()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE public.invoices
+    SET 
+        subtotal = (
+            SELECT COALESCE(SUM(total), 0)
+            FROM public.line_items
+            WHERE invoice_id = COALESCE(NEW.invoice_id, OLD.invoice_id)
+        ),
+        updated_at = timezone('utc'::text, now())
+    WHERE id = COALESCE(NEW.invoice_id, OLD.invoice_id);
+    
+    UPDATE public.invoices
+    SET 
+        tax_amount = subtotal * (tax_rate / 100),
+        total = subtotal + (subtotal * (tax_rate / 100))
+    WHERE id = COALESCE(NEW.invoice_id, OLD.invoice_id);
+    
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Create triggers to update invoice totals when line items change
+DROP TRIGGER IF EXISTS update_invoice_totals_trigger ON public.line_items;
+CREATE TRIGGER update_invoice_totals_trigger
+    AFTER INSERT OR UPDATE OR DELETE ON public.line_items
+    FOR EACH ROW EXECUTE FUNCTION update_invoice_totals();
